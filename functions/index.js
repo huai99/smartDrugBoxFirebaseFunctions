@@ -122,7 +122,7 @@ exports.sendFollowerNotification = functions.database.ref(pathToCompartmentNumbe
 });
 
 /*
-The function will send notification to the pharmacy that subscribe the topic
+ The function will send notification to the pharmacy that subscribe the topic
  */
 exports.sendPharmacyNotification = functions.database.ref(pathToMedicineOrder).onWrite(function (event) {
 
@@ -148,7 +148,7 @@ exports.sendPharmacyNotification = functions.database.ref(pathToMedicineOrder).o
 });
 
 /*
-After the pharmacy accept a particular medicine order, we will convert the order from the active list to inactive list
+ After the pharmacy accept a particular medicine order, we will convert the order from the active list to inactive listfuf
  */
 exports.convertOrderToInactive = functions.database.ref(pathToMedicineOrderAvailability).onWrite(function (event) {
 
@@ -182,6 +182,33 @@ exports.convertOrderToInactive = functions.database.ref(pathToMedicineOrderAvail
             event.data.ref.parent.remove();
             return admin.messaging().sendToDevice(token, payload);
         });
+    });
+});
+
+/*
+Get the requestedMedicine name from the user and send back to the drugstore name and medicine details back to the client
+ */
+exports.getPharmacyNameWithParticularMedicine = functions.https.onRequest(function (req, res) {
+    var pharmacyRef = admin.database().ref('Pharmacy');
+    var requestedMedicineName = req.body.medicineName;
+    var keyList = [];
+    var pharmacyNameMap = {};
+
+    pharmacyRef.on("value", function (pharmacySnapshot) {
+        pharmacySnapshot.forEach(function (snapshot) {
+            var pharmacy = snapshot.val();
+            var pharmacyDetails = pharmacy["Pharmacy-Details"];
+            var pharmacyName = pharmacyDetails.pharmacyName;
+            var medicineDetails = pharmacy["Pharmacy-Medicine-Details"];
+            for (var key in medicineDetails) {
+                var medicineName = medicineDetails[key].medicineName;
+                if (medicineName === requestedMedicineName) {
+                    keyList.push(key);
+                    pharmacyNameMap[pharmacyName] = medicineDetails[key];
+                }
+            }
+        });
+        res.status(200).send(pharmacyNameMap);
     });
 });
 
