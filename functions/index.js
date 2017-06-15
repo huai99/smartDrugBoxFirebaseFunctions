@@ -33,17 +33,22 @@ exports.addMedicineDataEntry =
                     var medicineImg = snapshot.child("medicineImage").val();
                     var medicineMoreInfo = snapshot.child("medicineMoreInfo").val();
                     var price = snapshot.child("price").val();
+                    var pharmacyDetailsRef = admin.database().ref('Pharmacy/' + drugStoreSnapshot.val() + '/Pharmacy-Details');
+                    pharmacyDetailsRef.on("value", function (detailsSnapshot) {
+                        var pharmacyDetails = detailsSnapshot.val();
+                        if (medicineDetails != null) {
+                            event.data.ref.child("description").set(description);
+                            event.data.ref.child("frequencyOfTaking").set(frequencyOfTaking);
+                            event.data.ref.child("id").set(medicineId);
+                            event.data.ref.child("medicineImage").set(medicineImg);
+                            event.data.ref.child("medicineMoreInfo").set(medicineMoreInfo);
+                            event.data.ref.child("price").set(price);
+                            event.data.ref.child("pharmacyDetails").set(pharmacyDetails);
+                        } else {
+                            return;
+                        }
+                    });
 
-                    if (medicineDetails != null) {
-                        event.data.ref.child("description").set(description);
-                        event.data.ref.child("frequencyOfTaking").set(frequencyOfTaking);
-                        event.data.ref.child("id").set(medicineId);
-                        event.data.ref.child("medicineImage").set(medicineImg);
-                        event.data.ref.child("medicineMoreInfo").set(medicineMoreInfo);
-                        event.data.ref.child("price").set(price);
-                    } else {
-                        return;
-                    }
                 });
             }, function (errorObject) {
                 console.log("The read failed: " + errorObject.code);
@@ -207,6 +212,7 @@ exports.getPharmacyNameWithParticularMedicine = functions.https.onRequest(functi
                     keyList.push(key);
                     medicineDetails[key].showStatus = undefined;
                     medicineDetails[key].drugstore = pharmacyName;
+                    medicineDetails[key].pharmacyDetails = pharmacyDetails;
                     pharmacyList.push(medicineDetails[key]);
                 }
             }
