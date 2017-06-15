@@ -38,7 +38,7 @@ exports.addMedicineDataEntry =
                         event.data.ref.child("description").set(description);
                         event.data.ref.child("frequencyOfTaking").set(frequencyOfTaking);
                         event.data.ref.child("id").set(medicineId);
-                        event.data.ref.child("medicineImg").set(medicineImg);
+                        event.data.ref.child("medicineImage").set(medicineImg);
                         event.data.ref.child("medicineMoreInfo").set(medicineMoreInfo);
                         event.data.ref.child("price").set(price);
                     } else {
