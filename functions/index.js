@@ -186,13 +186,14 @@ exports.convertOrderToInactive = functions.database.ref(pathToMedicineOrderAvail
 });
 
 /*
-Get the requestedMedicine name from the user and send back to the drugstore name and medicine details back to the client
+ Get the requestedMedicine name from the user and send back to the drugstore name and medicine details back to the client
  */
 exports.getPharmacyNameWithParticularMedicine = functions.https.onRequest(function (req, res) {
     var pharmacyRef = admin.database().ref('Pharmacy');
     var requestedMedicineName = req.body.medicineName;
     var keyList = [];
     var pharmacyNameMap = {};
+    var pharmacyList = [];
 
     pharmacyRef.on("value", function (pharmacySnapshot) {
         pharmacySnapshot.forEach(function (snapshot) {
@@ -204,11 +205,13 @@ exports.getPharmacyNameWithParticularMedicine = functions.https.onRequest(functi
                 var medicineName = medicineDetails[key].medicineName;
                 if (medicineName === requestedMedicineName) {
                     keyList.push(key);
-                    pharmacyNameMap[pharmacyName] = medicineDetails[key];
+                    medicineDetails[key].showStatus = undefined;
+                    medicineDetails[key].drugstore = pharmacyName;
+                    pharmacyList.push(medicineDetails[key]);
                 }
             }
         });
-        res.status(200).send(pharmacyNameMap);
+        res.status(200).send(pharmacyList);
     });
 });
 
