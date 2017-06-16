@@ -6,6 +6,7 @@ const pathToMedicineDetails = 'User/{name}/Medicine-Box/Compartment-Details/{pus
 const pathToCompartmentNumber = 'User/{name}/Medicine-Box/Compartment-Details/{pushId}/compartmentDetailsMap/{compartmentNumber}';
 const pathToMedicineOrder = 'Medicine-Order/Active/{pushId}';
 const pathToMedicineOrderAvailability = 'Medicine-Order/Active/{pushId}/availability';
+const pathToTargetSinglePharmacy = "Medicine-Order/Active/{pushId}/targetSinglePharmacy";
 
 /*
  When the user add a medicine by specifying the medicine name, the cloud function will
@@ -36,7 +37,7 @@ exports.addMedicineDataEntry =
                     var pharmacyDetailsRef = admin.database().ref('Pharmacy/' + drugStoreSnapshot.val() + '/Pharmacy-Details');
                     pharmacyDetailsRef.on("value", function (detailsSnapshot) {
                         var pharmacyDetails = detailsSnapshot.val();
-                        if (medicineDetails != null) {
+                        if (medicineDetails !== null) {
                             event.data.ref.child("description").set(description);
                             event.data.ref.child("frequencyOfTaking").set(frequencyOfTaking);
                             event.data.ref.child("id").set(medicineId);
@@ -44,8 +45,6 @@ exports.addMedicineDataEntry =
                             event.data.ref.child("medicineMoreInfo").set(medicineMoreInfo);
                             event.data.ref.child("price").set(price);
                             event.data.ref.child("pharmacyDetails").set(pharmacyDetails);
-                        } else {
-                            return;
                         }
                     });
 
@@ -74,15 +73,13 @@ exports.sendFollowerNotification = functions.database.ref(pathToCompartmentNumbe
         const runOutAlert = results[0];
         const tokensSnapshot = results[1];
 
-        if (runOutAlert.val() == true) {
+        if (runOutAlert.val() === true) {
             console.log("The token is " + tokensSnapshot.val());
 
             const getCompartmentDetails = event.data.ref.parent.child(event.params.compartmentNumber).once("value");
 
             return Promise.all([getCompartmentDetails]).then(function (results) {
                 var snapshot = results[0];
-                var medicineDetailsSnapShot = snapshot.child("/medicineDetails");
-
                 var fillUpStatus = safeParseString(snapshot.child("fillUpStatus").val());
                 //id represents the compartment number
                 var id = safeParseString(snapshot.child("id").val());
@@ -104,23 +101,7 @@ exports.sendFollowerNotification = functions.database.ref(pathToCompartmentNumbe
                 const tokens = tokensSnapshot.val();
 
 // Send notifications to all tokens.
-                return admin.messaging().sendToDevice(tokens, payload).then(function (response) {
-                    // For each message check if there was an error.
-                    const tokensToRemove = [];
-                    response.results.forEach(function (result, index) {
-                        const error = result.error;
-                        if (error) {
-                            console.error('Failure sending notification to', tokens[index], error);
-                            // Cleanup the tokens who are not registered anymore.
-                            if (error.code === 'messaging/invalid-registration-token' ||
-                                error.code === 'messaging/registration-token-not-registered') {
-                                tokensToRemove.push(tokensSnapshot.ref.child(tokens[index]).remove());
-                            }
-                        }
-                    })
-                    ;
-                    return Promise.all(tokensToRemove);
-                });
+                return admin.messaging().sendToDevice(tokens, payload);
             });
         }
     })
@@ -138,42 +119,54 @@ exports.sendPharmacyNotification = functions.database.ref(pathToMedicineOrder).o
         return;
     }
 
-    const payload = {
-        data: {
-            action: "NewMedicineOrderAction",
-            userGroup: "Pharmacy"
-        },
-        notification: {
-            title: "New order comes in",
-            body: "Click to know more !"
-        }
-    };
+    if (snapshot.val().targetSinglePharmacy === true) {
+        console.log(snapshot.val());
+        console.log(snapshot.val().targetSinglePharmacy);
+        var pharmacyName = snapshot.val().medicineDetails.drugstore;
+        const payload = {
+            data: {
+                action: "NewSpecializedOrderAction",
+                userGroup: "Pharmacy"
+            },
+            notification: {
+                title: "New Order added into queue ",
+                body: "Click to knore more!"
+            }
+        };
+        console.log("Send Notification by token");
+        sendNotificationToSinglePharmacy(pharmacyName, payload);
+    } else {
+        const payload = {
+            data: {
+                action: "NewMedicineOrderAction",
+                userGroup: "Pharmacy"
+            },
+            notification: {
+                title: "New order comes in",
+                body: "Click to know more !"
+            }
+        };
+        console.log("Send Notification by Topic ");
+        return admin.messaging().sendToTopic("medicineOrder", payload);
+    }
 
-    return admin.messaging().sendToTopic("medicineOrder", payload);
+
 });
 
-/*
- After the pharmacy accept a particular medicine order, we will convert the order from the active list to inactive listfuf
- */
-exports.convertOrderToInactive = functions.database.ref(pathToMedicineOrderAvailability).onWrite(function (event) {
-
-    const availability = event.data.val();
+exports.convertOrderToPharmacyOrderQueue = functions.database.ref(pathToTargetSinglePharmacy).onWrite(function (event) {
+    const targetSinglePharmacy = event.data.val();
     const getMedicineOrderPromise = event.data.ref.parent.once("value");
-    console.log(availability);
+    console.log(targetSinglePharmacy);
     return Promise.all([getMedicineOrderPromise]).then(function (results) {
         var medicineOrderSnapshot = results[0];
-        console.log(medicineOrderSnapshot.val());
-        if (availability == false) {
-            var medicineOrderRef = admin.database().ref('Medicine-Order');
-            var medicineOrder = medicineOrderSnapshot.val();
-            medicineOrderRef.child("Inactive").child(medicineOrder.id).set(medicineOrderSnapshot.val());
-        }
-
-        var userNameRef = admin.database().ref("User/" + medicineOrder.userName).child("registrationToken");
-        var getRegistrationTokenPromise = userNameRef.once("value");
-        return Promise.all([getRegistrationTokenPromise]).then(function (results) {
-            var registrationTokenSnapshot = results[0];
-            const token = registrationTokenSnapshot.val();
+        var medicineOrder = medicineOrderSnapshot.val();
+        if (targetSinglePharmacy === true) {
+            var pharmacyDetails = medicineOrder.pharmacyDetails;
+            var pharmacyName = pharmacyDetails.pharmacyName;
+            console.log(medicineOrder);
+            console.log("Pharmacy Name:" + pharmacyName);
+            var targetPharmacyRef = admin.database().ref("Pharmacy/" + pharmacyName);
+            targetPharmacyRef.child("/Order-Queue").child(medicineOrder.id).set(medicineOrder);
             const payload = {
                 data: {
                     action: "MedicineOrderAcceptedAction",
@@ -185,8 +178,40 @@ exports.convertOrderToInactive = functions.database.ref(pathToMedicineOrderAvail
                 }
             };
             event.data.ref.parent.remove();
-            return admin.messaging().sendToDevice(token, payload);
-        });
+            return sendNotificationToSingleUser(medicineOrder.userName, payload);
+        }
+    });
+});
+
+/*
+ After the pharmacy accept a particular medicine order, we will convert the order from the active list to inactive list
+ */
+exports.convertOrderToInactive = functions.database.ref(pathToMedicineOrderAvailability).onWrite(function (event) {
+
+    const availability = event.data.val();
+    const getMedicineOrderPromise = event.data.ref.parent.once("value");
+    console.log(availability);
+    return Promise.all([getMedicineOrderPromise]).then(function (results) {
+        var medicineOrderSnapshot = results[0];
+        console.log(medicineOrderSnapshot.val());
+        if (availability === false) {
+            var medicineOrderRef = admin.database().ref('Medicine-Order');
+            var medicineOrder = medicineOrderSnapshot.val();
+            medicineOrderRef.child("Inactive").child(medicineOrder.id).set(medicineOrder);
+            const payload = {
+                data: {
+                    action: "MedicineOrderAcceptedAction",
+                    userGroup: "User"
+                },
+                notification: {
+                    title: "Medicine Order Accepted",
+                    body: "Just sit still and wait for your medicine !"
+                }
+            };
+            event.data.ref.parent.remove();
+            sendNotificationToSingleUser(medicineOrder.userName, payload);
+        }
+
     });
 });
 
@@ -207,13 +232,15 @@ exports.getPharmacyNameWithParticularMedicine = functions.https.onRequest(functi
             var pharmacyName = pharmacyDetails.pharmacyName;
             var medicineDetails = pharmacy["Pharmacy-Medicine-Details"];
             for (var key in medicineDetails) {
-                var medicineName = medicineDetails[key].medicineName;
-                if (medicineName === requestedMedicineName) {
-                    keyList.push(key);
-                    medicineDetails[key].showStatus = undefined;
-                    medicineDetails[key].drugstore = pharmacyName;
-                    medicineDetails[key].pharmacyDetails = pharmacyDetails;
-                    pharmacyList.push(medicineDetails[key]);
+                if (medicineDetails.hasOwnProperty(key)) {
+                    var medicineName = medicineDetails[key].medicineName;
+                    if (medicineName === requestedMedicineName) {
+                        keyList.push(key);
+                        medicineDetails[key].showStatus = undefined;
+                        medicineDetails[key].drugstore = pharmacyName;
+                        medicineDetails[key].pharmacyDetails = pharmacyDetails;
+                        pharmacyList.push(medicineDetails[key]);
+                    }
                 }
             }
         });
@@ -221,28 +248,28 @@ exports.getPharmacyNameWithParticularMedicine = functions.https.onRequest(functi
     });
 });
 
-function sendNotification(token, payload) {
-    return admin.messaging().sendToDevice(token, payload).then(function (response) {
-        // For each message check if there was an error.
-        const tokensToRemove = [];
-        response.results.forEach(function (result, index) {
-            const error = result.error;
-            if (error) {
-                console.error('Failure sending notification to', tokens[index], error);
-                // Cleanup the tokens who are not registered anymore.
-                if (error.code === 'messaging/invalid-registration-token' ||
-                    error.code === 'messaging/registration-token-not-registered') {
-                    tokensToRemove.push(tokensSnapshot.ref.child(tokens[index]).remove());
-                }
-            }
-        })
-        ;
-        return Promise.all(tokensToRemove);
+function sendNotificationToSingleUser(userName, payload) {
+    var registrationTokenRef = admin.database().ref("User/" + userName).child("registrationToken");
+    var registrationTokenPromise = registrationTokenRef.once('value');
+    return Promise.all([registrationTokenPromise]).then(function (results) {
+        var registrationTokenSnapshot = results[0];
+        const token = registrationTokenSnapshot.val();
+        return admin.messaging().sendToDevice(token, payload);
+    });
+}
+
+function sendNotificationToSinglePharmacy(pharmacyName, payload) {
+    var registrationTokenRef = admin.database().ref("Pharmacy/" + pharmacyName).child("registrationToken");
+    var registrationTokenPromise = registrationTokenRef.once('value');
+    return Promise.all([registrationTokenPromise]).then(function (results) {
+        var registrationTokenSnapshot = results[0];
+        const token = registrationTokenSnapshot.val();
+        return admin.messaging().sendToDevice(token, payload);
     });
 }
 
 function safeParseString(obj) {
-    if (obj != null) {
+    if (obj !== null) {
         return obj.toString();
     } else {
         return "";
