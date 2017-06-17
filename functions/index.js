@@ -7,6 +7,7 @@ const pathToCompartmentNumber = 'User/{name}/Medicine-Box/Compartment-Details/{p
 const pathToMedicineOrder = 'Medicine-Order/Active/{pushId}';
 const pathToMedicineOrderAvailability = 'Medicine-Order/Active/{pushId}/availability';
 const pathToTargetSinglePharmacy = "Medicine-Order/Active/{pushId}/targetSinglePharmacy";
+const pathToRunOutAlert = "User/{name}/Medicine-Box/Compartment-Details/{pushId}/compartmentDetailsMap/{compartmentNumber}/runOutAlert";
 
 /*
  When the user add a medicine by specifying the medicine name, the cloud function will
@@ -60,23 +61,16 @@ exports.addMedicineDataEntry =
  has run out, the notification will pass the medicineBox id and the compartmentNumber of the drugbox to the
  user
  */
-exports.sendFollowerNotification = functions.database.ref(pathToCompartmentNumber).onWrite(function (event) {
-    const getRunOutAlertPromise = event.data.ref.child("runOutAlert").once('value');
+exports.sendFollowerNotification = functions.database.ref(pathToRunOutAlert).onWrite(function (event) {
     const getFCMTokenPromise = admin.database().ref("User/" + event.params.name + "/registrationToken").once('value');
-
-    if (!event.data.val()) {
-        return console.log("Error in user :" + event.params.name);
-    }
     console.log('Run out alert trigger for user : ' + event.params.name);
-
-    return Promise.all([getRunOutAlertPromise, getFCMTokenPromise]).then(function (results) {
-        const runOutAlert = results[0];
-        const tokensSnapshot = results[1];
-
-        if (runOutAlert.val() === true) {
+    console.log("Run out alert is " + event.data.val());
+    return Promise.all([getFCMTokenPromise]).then(function (results) {
+        const tokensSnapshot = results[0];
+        if (event.data.val() === true) {
             console.log("The token is " + tokensSnapshot.val());
 
-            const getCompartmentDetails = event.data.ref.parent.child(event.params.compartmentNumber).once("value");
+            const getCompartmentDetails = event.data.ref.parent.once("value");
 
             return Promise.all([getCompartmentDetails]).then(function (results) {
                 var snapshot = results[0];
@@ -85,6 +79,7 @@ exports.sendFollowerNotification = functions.database.ref(pathToCompartmentNumbe
                 var id = safeParseString(snapshot.child("id").val());
                 var medicineBoxId = safeParseString(snapshot.child("medicineBoxId").val());
                 // Notification details.
+                console.log("Notificaiton is sending out");
                 const payload = {
                     data: {
                         id: id,
@@ -153,40 +148,34 @@ exports.sendPharmacyNotification = functions.database.ref(pathToMedicineOrder).o
 
 });
 
-exports.convertOrderToPharmacyOrderQueue = functions.database.ref(pathToTargetSinglePharmacy).onWrite(function (event) {
-    const targetSinglePharmacy = event.data.val();
-    const getMedicineOrderPromise = event.data.ref.parent.once("value");
-    console.log(targetSinglePharmacy);
-    return Promise.all([getMedicineOrderPromise]).then(function (results) {
-        var medicineOrderSnapshot = results[0];
-        var medicineOrder = medicineOrderSnapshot.val();
-        if (targetSinglePharmacy === true) {
-            var pharmacyDetails = medicineOrder.pharmacyDetails;
-            var pharmacyName = pharmacyDetails.pharmacyName;
-            console.log(medicineOrder);
-            console.log("Pharmacy Name:" + pharmacyName);
-            var targetPharmacyRef = admin.database().ref("Pharmacy/" + pharmacyName);
-            targetPharmacyRef.child("/Order-Queue").child(medicineOrder.id).set(medicineOrder);
-            const payload = {
-                data: {
-                    action: "MedicineOrderAcceptedAction",
-                    userGroup: "User"
-                },
-                notification: {
-                    title: "Medicine Order Accepted",
-                    body: "Just sit still and wait for your medicine !"
-                }
-            };
-            event.data.ref.parent.remove();
-            return sendNotificationToSingleUser(medicineOrder.userName, payload);
-        }
-    });
+exports.convertOrderToPharmacyOrderQueue = functions.database.ref(pathToMedicineOrder).onWrite(function (event) {
+    const medicineOrder = event.data.val();
+    const targetSinglePharmacy = medicineOrder.targetSinglePharmacy;
+    const availability = medicineOrder.availability;
+    if (targetSinglePharmacy === true || availability === false) {
+        var pharmacyDetails = medicineOrder.pharmacyDetails;
+        var pharmacyName = pharmacyDetails.pharmacyName;
+        var targetPharmacyRef = admin.database().ref("Pharmacy/" + pharmacyName);
+        targetPharmacyRef.child("/Order-Queue").child(medicineOrder.id).set(medicineOrder);
+        const payload = {
+            data: {
+                action: "MedicineOrderAcceptedAction",
+                userGroup: "User"
+            },
+            notification: {
+                title: "Medicine Order Accepted",
+                body: "Just sit still and wait for your medicine !"
+            }
+        };
+        event.data.ref.parent.remove();
+        return sendNotificationToSingleUser(medicineOrder.userName, payload);
+    }
 });
 
 /*
  After the pharmacy accept a particular medicine order, we will convert the order from the active list to inactive list
  */
-exports.convertOrderToInactive = functions.database.ref(pathToMedicineOrderAvailability).onWrite(function (event) {
+/*exports.convertOrderToInactive = functions.database.ref(pathToMedicineOrderAvailability).onWrite(function (event) {
 
     const availability = event.data.val();
     const getMedicineOrderPromise = event.data.ref.parent.once("value");
@@ -213,7 +202,7 @@ exports.convertOrderToInactive = functions.database.ref(pathToMedicineOrderAvail
         }
 
     });
-});
+});*/
 
 /*
  Get the requestedMedicine name from the user and send back to the drugstore name and medicine details back to the client
