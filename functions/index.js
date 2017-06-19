@@ -85,7 +85,9 @@ exports.sendFollowerNotification = functions.database.ref(pathToRunOutAlert).onW
                         id: id,
                         medicineBoxId: medicineBoxId,
                         action: "MedicineRunOutAction",
-                        userGroup: "User"
+                        userGroup: "User",
+                        sender: "System",
+                        priority: "High"
                     },
                     notification: {
                         title: event.params.compartmentNumber + " has run out",
@@ -121,7 +123,9 @@ exports.sendPharmacyNotification = functions.database.ref(pathToMedicineOrder).o
         const payload = {
             data: {
                 action: "NewSpecializedOrderAction",
-                userGroup: "Pharmacy"
+                userGroup: "Pharmacy",
+                sender: "System",
+                priority: "High"
             },
             notification: {
                 title: "New Order added into queue ",
@@ -134,7 +138,9 @@ exports.sendPharmacyNotification = functions.database.ref(pathToMedicineOrder).o
         const payload = {
             data: {
                 action: "NewMedicineOrderAction",
-                userGroup: "Pharmacy"
+                userGroup: "Pharmacy",
+                sender: "System",
+                priority: "Medium"
             },
             notification: {
                 title: "New order comes in",
@@ -157,52 +163,36 @@ exports.convertOrderToPharmacyOrderQueue = functions.database.ref(pathToMedicine
         var pharmacyName = pharmacyDetails.pharmacyName;
         var targetPharmacyRef = admin.database().ref("Pharmacy/" + pharmacyName);
         targetPharmacyRef.child("/Order-Queue").child(medicineOrder.id).set(medicineOrder);
-        const payload = {
+        const userPayload = {
             data: {
                 action: "MedicineOrderAcceptedAction",
-                userGroup: "User"
+                userGroup: "User",
+                sender: "System",
+                priority: "Medium"
             },
             notification: {
                 title: "Medicine Order Accepted",
                 body: "Just sit still and wait for your medicine !"
             }
         };
+
+        const pharmacyPayload = {
+            data: {
+                action: "NewSpecializedOrderAction",
+                userGroup: "Pharmacy",
+                sender: "System",
+                priority: "High"
+            },
+            notification: {
+                title: "New order added into queue",
+                body: "Send the medicine to your customer asap !"
+            }
+        };
         event.data.ref.parent.remove();
-        return sendNotificationToSingleUser(medicineOrder.userName, payload);
+        sendNotificationToSinglePharmacy(medicineOrder.pharmacyDetails.pharmacyName,pharmacyPayload);
+        return sendNotificationToSingleUser(medicineOrder.userName, userPayload);
     }
 });
-
-/*
- After the pharmacy accept a particular medicine order, we will convert the order from the active list to inactive list
- */
-/*exports.convertOrderToInactive = functions.database.ref(pathToMedicineOrderAvailability).onWrite(function (event) {
-
-    const availability = event.data.val();
-    const getMedicineOrderPromise = event.data.ref.parent.once("value");
-    console.log(availability);
-    return Promise.all([getMedicineOrderPromise]).then(function (results) {
-        var medicineOrderSnapshot = results[0];
-        console.log(medicineOrderSnapshot.val());
-        if (availability === false) {
-            var medicineOrderRef = admin.database().ref('Medicine-Order');
-            var medicineOrder = medicineOrderSnapshot.val();
-            medicineOrderRef.child("Inactive").child(medicineOrder.id).set(medicineOrder);
-            const payload = {
-                data: {
-                    action: "MedicineOrderAcceptedAction",
-                    userGroup: "User"
-                },
-                notification: {
-                    title: "Medicine Order Accepted",
-                    body: "Just sit still and wait for your medicine !"
-                }
-            };
-            event.data.ref.parent.remove();
-            sendNotificationToSingleUser(medicineOrder.userName, payload);
-        }
-
-    });
-});*/
 
 /*
  Get the requestedMedicine name from the user and send back to the drugstore name and medicine details back to the client
@@ -211,7 +201,6 @@ exports.getPharmacyNameWithParticularMedicine = functions.https.onRequest(functi
     var pharmacyRef = admin.database().ref('Pharmacy');
     var requestedMedicineName = req.body.medicineName;
     var keyList = [];
-    var pharmacyNameMap = {};
     var pharmacyList = [];
 
     pharmacyRef.on("value", function (pharmacySnapshot) {
